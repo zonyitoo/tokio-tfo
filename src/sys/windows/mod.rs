@@ -1,7 +1,7 @@
 use std::{
     io::{self, ErrorKind},
     mem,
-    net::{SocketAddr, TcpStream as StdTcpStream},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream as StdTcpStream},
     ops::{Deref, DerefMut},
     os::windows::io::{AsRawSocket, FromRawSocket, IntoRawSocket},
     pin::Pin,
