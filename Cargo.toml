@@ -1,0 +1,19 @@
+[package]
+name = "tokio-tfo"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cfg-if = "1.0"
+libc = "0.2.94"
+futures = "0.3"
+log = "0.4"
+pin-project = "1.0"
+
+socket2 = { version = "0.4", features = ["all"] }
+tokio = { version = "1.9.0", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["mswsock", "winsock2"] }
