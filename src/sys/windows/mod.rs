@@ -10,10 +10,10 @@ use std::{
 };
 
 use futures::ready;
-use log::{debug, error, warn};
+use log::{error, warn};
 use once_cell::sync::Lazy;
 use pin_project::pin_project;
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use socket2::SockAddr;
 use tokio::{
     io::{AsyncRead, AsyncWrite, Interest, ReadBuf},
     net::{TcpSocket, TcpStream as TokioTcpStream},
@@ -134,12 +134,10 @@ impl TcpStream {
                 return Err(err);
             }
 
-            if opts.bind_local_addr.is_none() {
-                // Bind to a dummy address (required for TFO socket)
-                match addr.ip() {
-                    IpAddr::V4(..) => socket.bind(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0))?,
-                    IpAddr::V6(..) => socket.bind(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0))?,
-                }
+            // Bind to a dummy address (required for TFO socket)
+            match addr.ip() {
+                IpAddr::V4(..) => socket.bind(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0))?,
+                IpAddr::V6(..) => socket.bind(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0))?,
             }
         }
 
@@ -148,6 +146,13 @@ impl TcpStream {
         Ok(TcpStream {
             inner: stream,
             state: TcpStreamState::FastOpenConnect(addr),
+        })
+    }
+
+    pub fn from_std(stream: StdTcpStream) -> io::Result<TcpStream> {
+        TokioTcpStream::from_std(stream).map(|inner| TcpStream {
+            inner,
+            state: TcpStreamState::Connected,
         })
     }
 }
