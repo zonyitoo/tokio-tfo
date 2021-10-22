@@ -3,7 +3,7 @@ use std::{
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream as StdTcpStream},
     ops::{Deref, DerefMut},
-    os::windows::io::{AsRawSocket, FromRawSocket, IntoRawSocket},
+    os::windows::io::{AsRawSocket, FromRawSocket, IntoRawSocket, RawSocket},
     pin::Pin,
     ptr,
     task::{self, Poll},
@@ -41,6 +41,7 @@ use winapi::{
             SOCKET_ERROR,
             SOCK_STREAM,
             SOL_SOCKET,
+            WSAEINVAL,
             WSA_IO_INCOMPLETE,
         },
     },
@@ -111,6 +112,10 @@ impl TcpStream {
             SocketAddr::V6(..) => TcpSocket::new_v6()?,
         };
 
+        TcpStream::connect_with_socket(socket, addr).await
+    }
+
+    pub async fn connect_with_socket(socket: TcpSocket, addr: SocketAddr) -> io::Result<TcpStream> {
         let sock = socket.as_raw_socket() as SOCKET;
 
         unsafe {
@@ -135,9 +140,19 @@ impl TcpStream {
             }
 
             // Bind to a dummy address (required for TFO socket)
-            match addr.ip() {
-                IpAddr::V4(..) => socket.bind(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0))?,
-                IpAddr::V6(..) => socket.bind(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0))?,
+            let result = match addr.ip() {
+                IpAddr::V4(..) => socket.bind(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0)),
+                IpAddr::V6(..) => socket.bind(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0)),
+            };
+
+            if let Err(err) = result {
+                // https://docs.microsoft.com/en-us/windows/win32/api/winsock/nf-winsock-bind
+                // This error is returned of the socket `s` is already bound to an address.
+                if let Some(WSAEINVAL) = err.raw_os_error() {
+                    // It is Ok if socket have already bound to an address.
+                } else {
+                    return Err(err);
+                }
             }
         }
 
@@ -146,13 +161,6 @@ impl TcpStream {
         Ok(TcpStream {
             inner: stream,
             state: TcpStreamState::FastOpenConnect(addr),
-        })
-    }
-
-    pub fn from_std(stream: StdTcpStream) -> io::Result<TcpStream> {
-        TokioTcpStream::from_std(stream).map(|inner| TcpStream {
-            inner,
-            state: TcpStreamState::Connected,
         })
     }
 }
@@ -319,6 +327,12 @@ impl AsyncWrite for TcpStream {
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<io::Result<()>> {
         self.project().inner.poll_shutdown(cx)
+    }
+}
+
+impl AsRawSocket for TcpStream {
+    fn as_raw_socket(&self) -> RawSocket {
+        self.inner.as_raw_socket()
     }
 }
 

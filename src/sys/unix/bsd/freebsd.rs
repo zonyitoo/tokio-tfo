@@ -3,7 +3,7 @@ use std::{
     mem,
     net::{SocketAddr, TcpStream as StdTcpStream},
     ops::{Deref, DerefMut},
-    os::unix::io::{AsRawFd, FromRawFd, IntoRawFd},
+    os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd},
     pin::Pin,
     task::{self, Poll},
 };
@@ -37,6 +37,10 @@ impl TcpStream {
             SocketAddr::V6(..) => TcpSocket::new_v6()?,
         };
 
+        TcpStream::connect_with_socket(socket, addr).await
+    }
+
+    pub async fn connect_with_socket(socket: TcpSocket, addr: SocketAddr) -> io::Result<TcpStream> {
         unsafe {
             let enable: libc::c_int = 1;
 
@@ -60,13 +64,6 @@ impl TcpStream {
         Ok(TcpStream {
             inner: stream,
             state: TcpStreamState::FastOpenConnect(addr),
-        })
-    }
-
-    pub fn from_std(stream: StdTcpStream) -> io::Result<TcpStream> {
-        TokioTcpStream::from_std(stream).map(|inner| TcpStream {
-            inner,
-            state: TcpStreamState::Connected,
         })
     }
 }
@@ -182,6 +179,12 @@ impl AsyncWrite for TcpStream {
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<io::Result<()>> {
         self.project().inner.poll_shutdown(cx)
+    }
+}
+
+impl AsRawFd for TcpStream {
+    fn as_raw_fd(&self) -> RawFd {
+        self.inner.as_raw_fd()
     }
 }
 

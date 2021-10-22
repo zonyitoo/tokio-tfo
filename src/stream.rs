@@ -1,6 +1,10 @@
+#[cfg(unix)]
+use std::os::unix::io::{AsRawFd, RawFd};
+#[cfg(windows)]
+use std::os::windows::io::{AsRawSocket, RawSocket};
 use std::{
     io,
-    net::{SocketAddr, TcpStream as StdTcpStream},
+    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -8,11 +12,12 @@ use std::{
 use pin_project::pin_project;
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
-    net::TcpStream as TokioTcpStream,
+    net::{TcpSocket, TcpStream as TokioTcpStream},
 };
 
 use crate::sys::TcpStream as SysTcpStream;
 
+/// TCP stream connecting remote server with TFO
 #[pin_project]
 pub struct TfoStream {
     #[pin]
@@ -20,18 +25,33 @@ pub struct TfoStream {
 }
 
 impl TfoStream {
+    /// Connect to `addr` with TCP Fast Open
+    ///
+    /// `connect` errors may be returned from write operations like `poll_write` because
+    /// if TFO cookie is available, the actual `SYN` packet will be sent with data when
+    /// calling `poll_write`.
+    ///
+    /// On some platforms, this is a no-op method only recording the target address.
     pub async fn connect(addr: SocketAddr) -> io::Result<TfoStream> {
         SysTcpStream::connect(addr).await.map(|inner| TfoStream { inner })
     }
 
-    pub fn from_std(stream: StdTcpStream) -> io::Result<TfoStream> {
-        SysTcpStream::from_std(stream).map(|inner| TfoStream { inner })
+    /// Connect to `addr` with half constructed `TcpSocket`
+    ///
+    /// This is for customizing the whole process of `connect`, users could set any flags
+    /// before performing the actual TFO `connect`.
+    pub async fn connect_with_socket(socket: TcpSocket, addr: SocketAddr) -> io::Result<TfoStream> {
+        SysTcpStream::connect_with_socket(socket, addr)
+            .await
+            .map(|inner| TfoStream { inner })
     }
 
+    /// Returns the local address that this stream is bound to.
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.inner.local_addr()
     }
 
+    /// Returns the remote address that this stream is connected to.
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
         self.inner.peer_addr()
     }
@@ -70,5 +90,19 @@ impl From<TokioTcpStream> for TfoStream {
         TfoStream {
             inner: SysTcpStream::from(s),
         }
+    }
+}
+
+#[cfg(unix)]
+impl AsRawFd for TfoStream {
+    fn as_raw_fd(&self) -> RawFd {
+        self.inner.as_raw_fd()
+    }
+}
+
+#[cfg(windows)]
+impl AsRawSocket for TfoStream {
+    fn as_raw_socket(&self) -> RawSocket {
+        self.inner.as_raw_socket()
     }
 }
