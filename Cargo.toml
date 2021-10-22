@@ -6,7 +6,7 @@ description = "TCP Fast Open (TFO) in Rust for tokio"
 repository = "https://github.com/zonyitoo/tokio-tfo"
 readme = "README.md"
 documentation = "https://docs.rs/tokio-tfo"
-keywords = ["tokio", "tfo", "net", "network", "socket", "tcp"]
+keywords = ["tokio", "tfo", "network", "tcp"]
 license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
