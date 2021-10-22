@@ -34,7 +34,7 @@ jobs:
         with:
           profile: minimal
           components: clippy
-          toolchain: stable
+          toolchain: nightly
       - name: Build & Test (Default)
         run: cargo test --verbose --no-fail-fast
       - name: Clippy Check
