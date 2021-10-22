@@ -34,7 +34,7 @@ jobs:
         with:
           profile: minimal
           components: clippy
-          toolchain: nightly
+          toolchain: stable
       - name: Build & Test (Default)
         run: cargo test --verbose --no-fail-fast
       - name: Clippy Check
@@ -43,7 +43,7 @@ jobs:
           name: clippy-${{ matrix.platform }}
           token: ${{ secrets.GITHUB_TOKEN }}
           args: |
-            --verbose -- -Z macro-backtrace
+            --verbose --
             -W clippy::absurd_extreme_comparisons
             -W clippy::erasing_op
             -A clippy::collapsible_else_if
