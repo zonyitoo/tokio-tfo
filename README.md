@@ -1,6 +1,7 @@
 # TCP Fast Open (TFO) for Tokio
 
 [![Build & Test](https://github.com/zonyitoo/tokio-tfo/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/zonyitoo/tokio-tfo/actions/workflows/build-and-test.yml)
+[![crates.io](https://img.shields.io/crates/v/tokio-tfo.svg)](https://crates.io/crates/tokio-tfo)
 
 Asynchronous TCP Fast Open socket support in Rust for [tokio](https://crates.io/crates/tokio).
 
