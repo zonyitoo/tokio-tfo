@@ -9,7 +9,6 @@ use std::{
     task::{self, Poll},
 };
 
-use cfg_if::cfg_if;
 use futures::ready;
 use log::error;
 use pin_project::pin_project;
