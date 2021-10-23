@@ -7,6 +7,7 @@ use std::{
     net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use pin_project::pin_project;
@@ -54,6 +55,37 @@ impl TfoStream {
     /// Returns the remote address that this stream is connected to.
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
         self.inner.peer_addr()
+    }
+
+    /// Gets the value of the `TCP_NODELAY` option on this socket.
+    pub fn nodelay(&self) -> io::Result<bool> {
+        self.inner.nodelay()
+    }
+
+    /// Sets the value of the `TCP_NODELAY` option on this socket.
+    pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
+        self.inner.set_nodelay(nodelay)
+    }
+
+    /// Reads the linger duration for this socket by getting the `SO_LINGER`
+    /// option.
+    pub fn linger(&self) -> io::Result<Option<Duration>> {
+        self.inner.linger()
+    }
+
+    /// Sets the linger duration of this socket by setting the SO_LINGER option.
+    pub fn set_linger(&self, dur: Option<Duration>) -> io::Result<()> {
+        self.inner.set_linger(dur)
+    }
+
+    /// Gets the value of the `IP_TTL` option for this socket.
+    pub fn ttl(&self) -> io::Result<u32> {
+        self.inner.ttl()
+    }
+
+    /// Sets the value for the `IP_TTL` option on this socket.
+    pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
+        self.inner.set_ttl(ttl)
     }
 }
 
