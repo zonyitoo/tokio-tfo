@@ -54,7 +54,7 @@ impl TfoListener {
 
     /// Accept a new incoming connection to this listener
     pub async fn accept(&self) -> io::Result<(TfoStream, SocketAddr)> {
-        future::poll_fn(|cx| self.poll_accept(cx)).await.map(From::from)
+        future::poll_fn(|cx| self.poll_accept(cx)).await
     }
 
     /// Returns the local address that this listener is bound to.
