@@ -100,7 +100,7 @@ impl AsyncRead for TcpStream {
 impl AsyncWrite for TcpStream {
     fn poll_write(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
         loop {
-            let TcpStreamProj { inner, state } = self.project();
+            let TcpStreamProj { inner, state } = self.as_mut().project();
 
             match *state {
                 TcpStreamState::Connected => return inner.poll_write(cx, buf),
