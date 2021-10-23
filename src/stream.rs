@@ -1,3 +1,5 @@
+//! TFO stream
+
 #[cfg(unix)]
 use std::os::unix::io::{AsRawFd, RawFd};
 #[cfg(windows)]

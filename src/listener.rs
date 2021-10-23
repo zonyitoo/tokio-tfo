@@ -1,3 +1,5 @@
+//! TFO listener
+
 use std::{
     io,
     net::SocketAddr,

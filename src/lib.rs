@@ -1,3 +1,5 @@
+//! TCP Fast Open (TFO) in Rust for [tokio](https://crates.io/crates/tokio)
+
 mod sys;
 
 pub mod listener;
