@@ -21,7 +21,6 @@ use tokio::{
 enum TcpStreamState {
     Connected,
     FastOpenConnect(SocketAddr),
-    FastOpenWrite,
 }
 
 /// A `TcpStream` that supports TFO (TCP Fast Open)
@@ -88,7 +87,7 @@ impl TcpStream {
         Ok(TcpStream {
             inner: stream,
             state: if connected {
-                TcpStreamState::FastOpenWrite
+                TcpStreamState::Connected
             } else {
                 TcpStreamState::FastOpenConnect(addr)
             },
@@ -172,58 +171,6 @@ impl AsyncWrite for TcpStream {
                                     connecting = true;
 
                                     // Let `try_io` clears the write readiness.
-                                    Err(ErrorKind::WouldBlock.into())
-                                } else {
-                                    // Other errors, including EAGAIN, EWOULDBLOCK
-                                    Err(err)
-                                }
-                            }
-                        }
-                    });
-
-                    match send_result {
-                        Ok(n) => {
-                            // Connected successfully with fast open
-                            *state = TcpStreamState::Connected;
-                            return Ok(n).into();
-                        }
-                        Err(ref err) if err.kind() == ErrorKind::WouldBlock => {
-                            if connecting {
-                                // Connecting with normal TCP handshakes, write the first packet after connected
-                                *state = TcpStreamState::Connected;
-                            }
-                        }
-                        Err(err) => return Err(err).into(),
-                    }
-                }
-
-                TcpStreamState::FastOpenWrite => {
-                    // First `write` after `TCP_FASTOPEN_CONNECT`
-                    // Kernel >= 4.11
-
-                    let stream = inner.get_mut();
-
-                    // Ensure socket is writable
-                    ready!(stream.poll_write_ready(cx))?;
-
-                    let mut connecting = false;
-                    let send_result = stream.try_io(Interest::WRITABLE, || {
-                        unsafe {
-                            let ret = libc::send(stream.as_raw_fd(), buf.as_ptr() as *const libc::c_void, buf.len(), 0);
-
-                            if ret >= 0 {
-                                Ok(ret as usize)
-                            } else {
-                                let err = io::Error::last_os_error();
-                                // EINPROGRESS
-                                if let Some(libc::EINPROGRESS) = err.raw_os_error() {
-                                    // For non-blocking socket, it returns the number of bytes queued (and transmitted in the SYN-data packet) if cookie is available.
-                                    // If cookie is not available, it transmits a data-less SYN packet with Fast Open cookie request option and returns -EINPROGRESS like connect().
-                                    //
-                                    // So in this state. We have to loop again to call `poll_write` for sending the first packet.
-                                    connecting = true;
-
-                                    // Let `poll_write_io` clears the write readiness.
                                     Err(ErrorKind::WouldBlock.into())
                                 } else {
                                     // Other errors, including EAGAIN, EWOULDBLOCK
