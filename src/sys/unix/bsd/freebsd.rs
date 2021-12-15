@@ -115,9 +115,6 @@ impl AsyncWrite for TcpStream {
 
                     let stream = inner.get_mut();
 
-                    // Ensure socket is writable
-                    ready!(stream.poll_write_ready(cx))?;
-
                     let mut connecting = false;
                     let send_result = stream.try_io(Interest::WRITABLE, || {
                         unsafe {
