@@ -142,9 +142,6 @@ impl AsyncWrite for TcpStream {
 
                     let stream = inner.get_mut();
 
-                    // Ensure socket is writable
-                    ready!(stream.poll_write_ready(cx))?;
-
                     let mut connecting = false;
                     let send_result = stream.try_io(Interest::WRITABLE, || {
                         unsafe {
@@ -217,8 +214,8 @@ impl AsyncWrite for TcpStream {
                                 let err = io::Error::last_os_error();
                                 // EINPROGRESS
                                 if let Some(libc::EINPROGRESS) = err.raw_os_error() {
-                                    // For non-blocking socket, it returns the number of bytes queued (and transmitted in the SYN-data packet) if cookie is available.
-                                    // If cookie is not available, it transmits a data-less SYN packet with Fast Open cookie request option and returns -EINPROGRESS like connect().
+                                    // For non-blocking socket, it returns the number of bytes queued (and transmitted in the SYN-data packet) no matter cookie is available or not.
+                                    // When calling write() with an empty buffer, it transmits a data-less SYN packet with Fast Open cookie request option and returns -EINPROGRESS like connect().
                                     //
                                     // So in this state. We have to loop again to call `poll_write` for sending the first packet.
                                     connecting = true;
