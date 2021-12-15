@@ -17,8 +17,11 @@ use tokio::{
     net::{TcpSocket, TcpStream as TokioTcpStream},
 };
 
+use crate::sys::socket_take_error;
+
 enum TcpStreamState {
     Connected,
+    FastOpenConnecting,
     FastOpenConnect(SocketAddr),
 }
 
@@ -105,6 +108,21 @@ impl AsyncWrite for TcpStream {
             match *state {
                 TcpStreamState::Connected => return inner.poll_write(cx, buf),
 
+                TcpStreamState::FastOpenConnecting => {
+                    // Waiting for `connect` finish if `connect` returns EINPROGRESS
+
+                    let stream = inner.get_mut();
+                    ready!(stream.poll_write_ready(cx))?;
+
+                    // Get SO_ERROR checking `connect` error.
+                    match socket_take_error(stream) {
+                        Ok(Some(err)) | Err(err) => return Err(err).into(),
+                        _ => {}
+                    }
+
+                    *state = TcpStreamState::Connected;
+                }
+
                 TcpStreamState::FastOpenConnect(addr) => {
                     // TCP_FASTOPEN was supported since FreeBSD 12.0
                     //
@@ -160,7 +178,7 @@ impl AsyncWrite for TcpStream {
                         Err(ref err) if err.kind() == ErrorKind::WouldBlock => {
                             if connecting {
                                 // Connecting with normal TCP handshakes, write the first packet after connected
-                                *state = TcpStreamState::Connected;
+                                *state = TcpStreamState::FastOpenConnecting;
                             }
                         }
                         Err(err) => return Err(err).into(),

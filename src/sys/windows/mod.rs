@@ -13,7 +13,7 @@ use futures::ready;
 use log::{error, warn};
 use once_cell::sync::Lazy;
 use pin_project::pin_project;
-use socket2::SockAddr;
+use socket2::{SockAddr, Socket};
 use tokio::{
     io::{AsyncRead, AsyncWrite, Interest, ReadBuf},
     net::{TcpSocket, TcpStream as TokioTcpStream},
@@ -307,6 +307,11 @@ impl AsyncWrite for TcpStream {
 
                     match write_result {
                         Ok(n) => {
+                            // Check SO_ERROR after `connect`
+                            if let Err(err) = socket_take_error(stream) {
+                                return Err(err).into();
+                            }
+
                             // Connect successfully with fast open
                             *state = TcpStreamState::Connected;
                             return Ok(n).into();
@@ -365,4 +370,11 @@ pub fn set_tcp_fastopen<S: AsRawSocket>(socket: &S) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+pub(crate) fn socket_take_error<S: AsRawSocket>(fd: &S) -> io::Result<Option<io::Error>> {
+    let socket = unsafe { Socket::from_raw_socket(fd.as_raw_socket()) };
+    let result = socket.take_error();
+    socket.into_raw_socket();
+    result
 }
