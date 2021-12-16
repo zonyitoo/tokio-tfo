@@ -1,10 +1,9 @@
 use std::{
-    io::{self, ErrorKind},
+    io,
     mem,
     net::{SocketAddr, TcpStream as StdTcpStream},
     os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd},
     pin::Pin,
-    sync::atomic::{AtomicBool, Ordering},
     task::{self, Poll, Waker},
     time::Duration,
 };
@@ -14,7 +13,7 @@ use log::error;
 use pin_project::pin_project;
 use socket2::{SockAddr, Socket};
 use tokio::{
-    io::{AsyncRead, AsyncWrite, Interest, ReadBuf},
+    io::{AsyncRead, AsyncWrite, ReadBuf},
     net::{TcpSocket, TcpStream as TokioTcpStream},
 };
 
@@ -207,7 +206,7 @@ impl AsyncWrite for TcpStream {
                         let saddr = SockAddr::from(addr);
 
                         libc::sendto(
-                            stream.as_raw_fd(),
+                            socket.as_raw_fd(),
                             buf.as_ptr() as *const libc::c_void,
                             buf.len(),
                             0, // Yes, BSD doesn't need MSG_FASTOPEN
