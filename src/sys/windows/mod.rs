@@ -2,11 +2,11 @@ use std::{
     io::{self, ErrorKind},
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream as StdTcpStream},
-    ops::{Deref, DerefMut},
     os::windows::io::{AsRawSocket, FromRawSocket, IntoRawSocket, RawSocket},
     pin::Pin,
     ptr,
-    task::{self, Poll},
+    task::{self, Poll, Waker},
+    time::Duration,
 };
 
 use futures::ready;
@@ -30,19 +30,8 @@ use winapi::{
         mswsock::{LPFN_CONNECTEX, SO_UPDATE_CONNECT_CONTEXT, WSAID_CONNECTEX},
         winnt::PVOID,
         winsock2::{
-            closesocket,
-            setsockopt,
-            socket,
-            WSAGetLastError,
-            WSAGetOverlappedResult,
-            WSAIoctl,
-            INVALID_SOCKET,
-            SOCKET,
-            SOCKET_ERROR,
-            SOCK_STREAM,
-            SOL_SOCKET,
-            WSAEINVAL,
-            WSA_IO_INCOMPLETE,
+            closesocket, setsockopt, socket, WSAGetLastError, WSAGetOverlappedResult, WSAIoctl, INVALID_SOCKET, SOCKET,
+            SOCKET_ERROR, SOCK_STREAM, SOL_SOCKET, WSAEINVAL, WSA_IO_INCOMPLETE,
         },
     },
 };
@@ -79,7 +68,7 @@ static PFN_CONNECTEX_OPT: Lazy<LPFN_CONNECTEX> = Lazy::new(|| unsafe {
         let err = WSAGetLastError();
         let e = io::Error::from_raw_os_error(err);
 
-        warn!("Failed to get ConnectEx function from WSA extension, error: {}", e);
+        warn!("failed to get ConnectEx function from WSA extension, error: {}", e);
     }
 
     let _ = closesocket(socket);
@@ -89,7 +78,7 @@ static PFN_CONNECTEX_OPT: Lazy<LPFN_CONNECTEX> = Lazy::new(|| unsafe {
 
 enum TcpStreamState {
     Connected,
-    FastOpenConnect(SocketAddr),
+    FastOpenConnect,
     FastOpenConnecting(Box<OVERLAPPED>),
 }
 
@@ -97,12 +86,42 @@ enum TcpStreamState {
 unsafe impl Send for TcpStreamState {}
 unsafe impl Sync for TcpStreamState {}
 
+#[pin_project(project = TcpStreamOptionProj)]
+enum TcpStreamOption {
+    Connected(#[pin] TokioTcpStream),
+    Connecting {
+        socket: TcpSocket,
+        addr: SocketAddr,
+        reader: Option<Waker>,
+    },
+    Empty,
+}
+
+impl TcpStreamOption {
+    #[inline]
+    fn connected(self: Pin<&mut Self>) -> Pin<&mut TokioTcpStream> {
+        match self.project() {
+            TcpStreamOptionProj::Connected(stream) => stream,
+            _ => unreachable!("stream connected without a TcpStream instance"),
+        }
+    }
+}
+
 /// A `TcpStream` that supports TFO (TCP Fast Open)
 #[pin_project(project = TcpStreamProj)]
 pub struct TcpStream {
     #[pin]
-    inner: TokioTcpStream,
+    stream: TcpStreamOption,
     state: TcpStreamState,
+}
+
+macro_rules! call_socket_api {
+    ($self:ident . $name:ident ( $($param:expr),* )) => {{
+        let socket = unsafe { Socket::from_raw_socket($self.as_raw_socket()) };
+        let result = socket.$name($($param,)*);
+        socket.into_raw_socket();
+        result
+    }};
 }
 
 impl TcpStream {
@@ -156,33 +175,57 @@ impl TcpStream {
             }
         }
 
-        let stream = TokioTcpStream::from_std(unsafe { StdTcpStream::from_raw_socket(socket.into_raw_socket()) })?;
-
         Ok(TcpStream {
-            inner: stream,
-            state: TcpStreamState::FastOpenConnect(addr),
+            stream: TcpStreamOption::Connecting {
+                socket,
+                addr,
+                reader: None,
+            },
+            state: TcpStreamState::FastOpenConnect,
         })
     }
-}
 
-impl Deref for TcpStream {
-    type Target = TokioTcpStream;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        call_socket_api!(self.local_addr()).map(|s| s.as_socket().unwrap())
     }
-}
 
-impl DerefMut for TcpStream {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
+    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
+        match self.stream {
+            TcpStreamOption::Connected(ref s) => s.peer_addr(),
+            TcpStreamOption::Connecting { addr, .. } => Ok(addr),
+            _ => unreachable!("stream must be either connecting or connected"),
+        }
+    }
+
+    pub fn nodelay(&self) -> io::Result<bool> {
+        call_socket_api!(self.nodelay())
+    }
+
+    pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
+        call_socket_api!(self.set_nodelay(nodelay))
+    }
+
+    pub fn linger(&self) -> io::Result<Option<Duration>> {
+        call_socket_api!(self.linger())
+    }
+
+    pub fn set_linger(&self, dur: Option<Duration>) -> io::Result<()> {
+        call_socket_api!(self.set_linger(dur))
+    }
+
+    pub fn ttl(&self) -> io::Result<u32> {
+        call_socket_api!(self.ttl())
+    }
+
+    pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
+        call_socket_api!(self.set_ttl(ttl))
     }
 }
 
 impl From<TokioTcpStream> for TcpStream {
     fn from(s: TokioTcpStream) -> Self {
         TcpStream {
-            inner: s,
+            stream: TcpStreamOption::Connected(s),
             state: TcpStreamState::Connected,
         }
     }
@@ -190,7 +233,19 @@ impl From<TokioTcpStream> for TcpStream {
 
 impl AsyncRead for TcpStream {
     fn poll_read(self: Pin<&mut Self>, cx: &mut task::Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
-        self.project().inner.poll_read(cx, buf)
+        let this = self.project();
+
+        match this.stream.project() {
+            TcpStreamOptionProj::Connected(stream) => stream.poll_read(cx, buf),
+            TcpStreamOptionProj::Connecting { reader, .. } => {
+                if let Some(w) = reader.take() {
+                    w.wake();
+                }
+                *reader = Some(cx.waker().clone());
+                Poll::Pending
+            }
+            TcpStreamOptionProj::Empty => unreachable!("stream must be either connecting or connected"),
+        }
     }
 }
 
@@ -211,43 +266,68 @@ fn set_update_connect_context(sock: SOCKET) -> io::Result<()> {
 impl AsyncWrite for TcpStream {
     fn poll_write(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
         loop {
-            let TcpStreamProj { inner, state } = self.as_mut().project();
+            let TcpStreamProj { state, mut stream } = self.as_mut().project();
 
             match *state {
-                TcpStreamState::Connected => return inner.poll_write(cx, buf),
+                TcpStreamState::Connected => return stream.connected().poll_write(cx, buf),
 
-                TcpStreamState::FastOpenConnect(addr) => {
-                    let saddr = SockAddr::from(addr);
-
+                TcpStreamState::FastOpenConnect => {
                     unsafe {
                         // https://docs.microsoft.com/en-us/windows/win32/api/mswsock/nc-mswsock-lpfn_connectex
                         let connect_ex = PFN_CONNECTEX_OPT
-                            .expect("LPFN_CONNECTEX function doesn't exist. It is only supported after Windows 10");
-
-                        let sock = inner.as_raw_socket() as SOCKET;
+                            .expect("LPFN_CONNECTEX function doesn't exist. It is only supported since Windows 10");
 
                         let mut overlapped: Box<OVERLAPPED> = Box::new(mem::zeroed());
-
                         let mut bytes_sent: DWORD = 0;
-                        let ret: BOOL = connect_ex(
-                            sock,
-                            saddr.as_ptr(),
-                            saddr.len() as c_int,
-                            buf.as_ptr() as PVOID,
-                            buf.len() as DWORD,
-                            &mut bytes_sent as LPDWORD,
-                            overlapped.as_mut() as LPOVERLAPPED,
-                        );
+
+                        let ret: BOOL = {
+                            let (socket, addr) = match stream.as_mut().project() {
+                                TcpStreamOptionProj::Connecting { socket, addr, .. } => (socket, *addr),
+                                _ => unreachable!("stream connecting without address"),
+                            };
+
+                            let sock = socket.as_raw_socket() as SOCKET;
+                            let saddr = SockAddr::from(addr);
+
+                            connect_ex(
+                                sock,
+                                saddr.as_ptr(),
+                                saddr.len() as c_int,
+                                buf.as_ptr() as PVOID,
+                                buf.len() as DWORD,
+                                &mut bytes_sent as LPDWORD,
+                                overlapped.as_mut() as LPOVERLAPPED,
+                            )
+                        };
 
                         if ret == TRUE {
                             // Connected successfully.
 
                             // Make getpeername() works
-                            set_update_connect_context(sock)?;
 
                             debug_assert!(bytes_sent as usize <= buf.len());
 
+                            let new_stream = TcpStreamOption::Empty;
+                            let old_stream = mem::replace(&mut *stream, new_stream);
+
+                            let (socket, mut reader) = match old_stream {
+                                TcpStreamOption::Connecting { socket, reader, .. } => (socket, reader),
+                                _ => unreachable!("stream connecting without address"),
+                            };
+
+                            let sock = socket.as_raw_socket() as SOCKET;
+                            set_update_connect_context(sock)?;
+
+                            *stream = TcpStreamOption::Connected(TokioTcpStream::from_std(
+                                StdTcpStream::from_raw_socket(socket.into_raw_socket()),
+                            )?);
                             *state = TcpStreamState::Connected;
+
+                            // Wake up the Future that pending on poll_read
+                            if let Some(w) = reader.take() {
+                                w.wake();
+                            }
+
                             return Ok(bytes_sent as usize).into();
                         }
 
@@ -257,12 +337,28 @@ impl AsyncWrite for TcpStream {
                         }
 
                         // ConnectEx pending (ERROR_IO_PENDING), check later in FastOpenConnecting
+                        let new_stream = TcpStreamOption::Empty;
+                        let old_stream = mem::replace(&mut *stream, new_stream);
+
+                        let (socket, mut reader) = match old_stream {
+                            TcpStreamOption::Connecting { socket, reader, .. } => (socket, reader),
+                            _ => unreachable!("stream connecting without address"),
+                        };
+
+                        *stream = TcpStreamOption::Connected(TokioTcpStream::from_std(StdTcpStream::from_raw_socket(
+                            socket.into_raw_socket(),
+                        ))?);
                         *state = TcpStreamState::FastOpenConnecting(overlapped);
+
+                        // Wake up the Future that pending on poll_read
+                        if let Some(w) = reader.take() {
+                            w.wake();
+                        }
                     }
                 }
 
                 TcpStreamState::FastOpenConnecting(ref mut overlapped) => {
-                    let stream = inner.get_mut();
+                    let stream = stream.connected();
 
                     ready!(stream.poll_write_ready(cx))?;
 
@@ -308,7 +404,7 @@ impl AsyncWrite for TcpStream {
                     match write_result {
                         Ok(n) => {
                             // Check SO_ERROR after `connect`
-                            if let Err(err) = socket_take_error(stream) {
+                            if let Err(err) = socket_take_error(stream.get_mut()) {
                                 return Err(err).into();
                             }
 
@@ -327,17 +423,27 @@ impl AsyncWrite for TcpStream {
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<io::Result<()>> {
-        self.project().inner.poll_flush(cx)
+        match self.project().stream.project() {
+            TcpStreamOptionProj::Connected(stream) => stream.poll_flush(cx),
+            _ => Ok(()).into(),
+        }
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<io::Result<()>> {
-        self.project().inner.poll_shutdown(cx)
+        match self.project().stream.project() {
+            TcpStreamOptionProj::Connected(stream) => stream.poll_shutdown(cx),
+            _ => Ok(()).into(),
+        }
     }
 }
 
 impl AsRawSocket for TcpStream {
     fn as_raw_socket(&self) -> RawSocket {
-        self.inner.as_raw_socket()
+        match self.stream {
+            TcpStreamOption::Connected(ref s) => s.as_raw_socket(),
+            TcpStreamOption::Connecting { ref socket, .. } => socket.as_raw_socket(),
+            _ => unreachable!("stream connected without a TcpStream instance"),
+        }
     }
 }
 
