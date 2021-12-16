@@ -28,7 +28,7 @@ async fn echo() {
     const TEST_PAYLOAD: &[u8] = b"hello world";
 
     let mut client = TfoStream::connect(server_addr).await.unwrap();
-    client.write_all(&TEST_PAYLOAD).await.unwrap();
+    client.write_all(TEST_PAYLOAD).await.unwrap();
 
     let mut buffer = [0u8; 1024];
     let n = client.read(&mut buffer).await.unwrap();

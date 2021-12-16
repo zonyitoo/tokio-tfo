@@ -34,7 +34,7 @@ async fn custom_echo() {
     socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
 
     let mut client = TfoStream::connect_with_socket(socket, server_addr).await.unwrap();
-    client.write_all(&TEST_PAYLOAD).await.unwrap();
+    client.write_all(TEST_PAYLOAD).await.unwrap();
 
     let mut buffer = [0u8; 1024];
     let n = client.read(&mut buffer).await.unwrap();
