@@ -1,4 +1,5 @@
 use std::{
+    ffi::c_void,
     io::{self, ErrorKind},
     mem,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream as StdTcpStream},
@@ -18,47 +19,70 @@ use tokio::{
     io::{AsyncRead, AsyncWrite, Interest, ReadBuf},
     net::{TcpSocket, TcpStream as TokioTcpStream},
 };
-use winapi::{
-    ctypes::{c_char, c_int},
-    shared::{
-        minwindef::{BOOL, DWORD, FALSE, LPDWORD, LPVOID, TRUE},
-        winerror::ERROR_IO_PENDING,
-        ws2def::{AF_INET, IPPROTO_TCP, SIO_GET_EXTENSION_FUNCTION_POINTER},
-    },
-    um::{
-        minwinbase::{LPOVERLAPPED, OVERLAPPED},
-        mswsock::{LPFN_CONNECTEX, SO_UPDATE_CONNECT_CONTEXT, WSAID_CONNECTEX},
-        winnt::PVOID,
-        winsock2::{
-            closesocket, setsockopt, socket, WSAGetLastError, WSAGetOverlappedResult, WSAIoctl, INVALID_SOCKET, SOCKET,
-            SOCKET_ERROR, SOCK_STREAM, SOL_SOCKET, WSAEINVAL, WSA_IO_INCOMPLETE,
+
+use windows_sys::{
+    core::{GUID, PCSTR},
+    Win32::{
+        Foundation::BOOL,
+        Networking::WinSock::{
+            closesocket,
+            setsockopt,
+            socket,
+            WSAGetLastError,
+            WSAGetOverlappedResult,
+            WSAIoctl,
+            AF_INET,
+            INVALID_SOCKET,
+            IPPROTO_TCP,
+            LPFN_CONNECTEX,
+            SIO_GET_EXTENSION_FUNCTION_POINTER,
+            SOCKADDR,
+            SOCKET,
+            SOCKET_ERROR,
+            SOCK_STREAM,
+            SOL_SOCKET,
+            SO_UPDATE_CONNECT_CONTEXT,
+            TCP_FASTOPEN,
+            WSAEINVAL,
+            WSA_IO_INCOMPLETE,
+            WSA_IO_PENDING,
         },
+        System::IO::OVERLAPPED,
     },
 };
 
-// ws2ipdef.h
-// FIXME: Use winapi's definition if issue resolved
-// https://github.com/retep998/winapi-rs/issues/856
-const TCP_FASTOPEN: DWORD = 15;
+// GUID of CONNECTEX
+// https://docs.microsoft.com/en-us/windows/win32/api/mswsock/nc-mswsock-lpfn_connectex
+// Mswsock.h
+const WSAID_CONNECTEX: GUID = GUID {
+    data1: 0x25a207b9,
+    data2: 0xddf3,
+    data3: 0x4660,
+    data4: [0x8e, 0xe9, 0x76, 0xe5, 0x8c, 0x74, 0x06, 0x3e],
+};
+
+// BOOL values
+const TRUE: BOOL = 1;
+const FALSE: BOOL = 0;
 
 static PFN_CONNECTEX_OPT: Lazy<LPFN_CONNECTEX> = Lazy::new(|| unsafe {
-    let socket = socket(AF_INET, SOCK_STREAM, 0);
+    let socket = socket(AF_INET as i32, SOCK_STREAM as i32, 0);
     if socket == INVALID_SOCKET {
         return None;
     }
 
-    let mut guid = WSAID_CONNECTEX;
-    let mut num_bytes: DWORD = 0;
+    let guid = WSAID_CONNECTEX;
+    let mut num_bytes: u32 = 0;
 
     let mut connectex: LPFN_CONNECTEX = None;
 
     let ret = WSAIoctl(
         socket,
         SIO_GET_EXTENSION_FUNCTION_POINTER,
-        &mut guid as *mut _ as LPVOID,
-        mem::size_of_val(&guid) as DWORD,
-        &mut connectex as *mut _ as LPVOID,
-        mem::size_of_val(&connectex) as DWORD,
+        &guid as *const _ as *const c_void,
+        mem::size_of_val(&guid) as u32,
+        &mut connectex as *mut _ as *mut c_void,
+        mem::size_of_val(&connectex) as u32,
         &mut num_bytes as *mut _,
         ptr::null_mut(),
         None,
@@ -142,14 +166,14 @@ impl TcpStream {
 
             // Enable TCP_FASTOPEN option
 
-            let enable: DWORD = 1;
+            let enable: u32 = 1;
 
             let ret = setsockopt(
                 sock,
-                IPPROTO_TCP as c_int,
-                TCP_FASTOPEN as c_int,
-                &enable as *const _ as *const c_char,
-                mem::size_of_val(&enable) as c_int,
+                IPPROTO_TCP as i32,
+                TCP_FASTOPEN as i32,
+                &enable as *const _ as PCSTR,
+                mem::size_of_val(&enable) as i32,
             );
 
             if ret == SOCKET_ERROR {
@@ -253,7 +277,13 @@ fn set_update_connect_context(sock: SOCKET) -> io::Result<()> {
     unsafe {
         // Make getpeername work
         // https://docs.microsoft.com/en-us/windows/win32/api/mswsock/nc-mswsock-lpfn_connectex
-        let ret = setsockopt(sock, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, ptr::null(), 0);
+        let ret = setsockopt(
+            sock,
+            SOL_SOCKET as i32,
+            SO_UPDATE_CONNECT_CONTEXT as i32,
+            ptr::null(),
+            0,
+        );
         if ret == SOCKET_ERROR {
             let err = WSAGetLastError();
             return Err(io::Error::from_raw_os_error(err));
@@ -278,7 +308,7 @@ impl AsyncWrite for TcpStream {
                             .expect("LPFN_CONNECTEX function doesn't exist. It is only supported since Windows 10");
 
                         let mut overlapped: Box<OVERLAPPED> = Box::new(mem::zeroed());
-                        let mut bytes_sent: DWORD = 0;
+                        let mut bytes_sent: u32 = 0;
 
                         let ret: BOOL = {
                             let (socket, addr) = match stream.as_mut().project() {
@@ -291,12 +321,12 @@ impl AsyncWrite for TcpStream {
 
                             connect_ex(
                                 sock,
-                                saddr.as_ptr(),
-                                saddr.len() as c_int,
-                                buf.as_ptr() as PVOID,
-                                buf.len() as DWORD,
-                                &mut bytes_sent as LPDWORD,
-                                overlapped.as_mut() as LPOVERLAPPED,
+                                saddr.as_ptr() as *const SOCKADDR,
+                                saddr.len() as i32,
+                                buf.as_ptr() as *const c_void,
+                                buf.len() as u32,
+                                &mut bytes_sent as *mut u32,
+                                overlapped.as_mut() as *mut OVERLAPPED,
                             )
                         };
 
@@ -332,11 +362,11 @@ impl AsyncWrite for TcpStream {
                         }
 
                         let err = WSAGetLastError();
-                        if err != ERROR_IO_PENDING as c_int {
+                        if err != WSA_IO_PENDING {
                             return Err(io::Error::from_raw_os_error(err)).into();
                         }
 
-                        // ConnectEx pending (ERROR_IO_PENDING), check later in FastOpenConnecting
+                        // ConnectEx pending (WSA_IO_PENDING), check later in FastOpenConnecting
                         let new_stream = TcpStreamOption::Empty;
                         let old_stream = mem::replace(&mut *stream, new_stream);
 
@@ -366,16 +396,16 @@ impl AsyncWrite for TcpStream {
                         unsafe {
                             let sock = stream.as_raw_socket() as SOCKET;
 
-                            let mut bytes_sent: DWORD = 0;
-                            let mut flags: DWORD = 0;
+                            let mut bytes_sent: u32 = 0;
+                            let mut flags: u32 = 0;
 
                             // Fetch ConnectEx's result in a non-blocking way.
                             let ret: BOOL = WSAGetOverlappedResult(
                                 sock,
-                                overlapped.as_mut() as LPOVERLAPPED,
-                                &mut bytes_sent as LPDWORD,
+                                overlapped.as_mut() as *mut OVERLAPPED,
+                                &mut bytes_sent as *mut u32,
                                 FALSE, // fWait = false, non-blocking, returns WSA_IO_INCOMPLETE
-                                &mut flags as LPDWORD,
+                                &mut flags as *mut u32,
                             );
 
                             if ret == TRUE {
@@ -457,15 +487,15 @@ impl AsRawSocket for TcpStream {
 ///
 /// TCP_FASTOPEN is supported since Windows 10
 pub fn set_tcp_fastopen<S: AsRawSocket>(socket: &S) -> io::Result<()> {
-    let enable: DWORD = 1;
+    let enable: u32 = 1;
 
     unsafe {
         let ret = setsockopt(
             socket.as_raw_socket() as SOCKET,
-            IPPROTO_TCP as c_int,
-            TCP_FASTOPEN as c_int,
-            &enable as *const _ as *const c_char,
-            mem::size_of_val(&enable) as c_int,
+            IPPROTO_TCP as i32,
+            TCP_FASTOPEN as i32,
+            &enable as *const _ as PCSTR,
+            mem::size_of_val(&enable) as i32,
         );
 
         if ret == SOCKET_ERROR {
