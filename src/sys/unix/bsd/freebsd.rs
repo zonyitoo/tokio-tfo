@@ -158,7 +158,9 @@ impl AsyncRead for TcpStream {
             TcpStreamOptionProj::Connected(stream) => stream.poll_read(cx, buf),
             TcpStreamOptionProj::Connecting { reader, .. } => {
                 if let Some(w) = reader.take() {
-                    w.wake();
+                    if !w.will_wake(cx.waker()) {
+                        w.wake();
+                    }
                 }
                 *reader = Some(cx.waker().clone());
                 Poll::Pending
@@ -233,7 +235,9 @@ impl AsyncWrite for TcpStream {
 
                         // Wake up the Future that pending on poll_read
                         if let Some(w) = reader.take() {
-                            w.wake();
+                            if !w.will_wake(cx.waker()) {
+                                w.wake();
+                            }
                         }
 
                         return Ok(ret as usize).into();
@@ -265,7 +269,9 @@ impl AsyncWrite for TcpStream {
 
                             // Wake up the Future that pending on poll_read
                             if let Some(w) = reader.take() {
-                                w.wake();
+                                if !w.will_wake(cx.waker()) {
+                                    w.wake();
+                                }
                             }
                         } else {
                             // Other errors, including EAGAIN, EWOULDBLOCK
