@@ -8,13 +8,11 @@ use std::{
 
 use cfg_if::cfg_if;
 use futures::{future, ready};
-#[cfg(any(target_os = "macos", target_os = "ios", target_os = "watchos", target_os = "tvos"))]
-use log::debug;
 use tokio::net::{TcpListener as TokioTcpListener, TcpSocket};
 
-use crate::{stream::TfoStream, sys::set_tcp_fastopen};
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "watchos", target_os = "tvos"))]
 use crate::sys::set_tcp_fastopen_force_enable;
+use crate::{stream::TfoStream, sys::set_tcp_fastopen};
 
 /// TCP listener with TFO enabled
 pub struct TfoListener {
@@ -51,7 +49,7 @@ impl TfoListener {
                 set_tcp_fastopen(&socket)?;
             } else {
                 if let Err(err) = set_tcp_fastopen_force_enable(&socket) {
-                    debug!("failed to set TCP_FASTOPEN_FORCE_ENABLE: {:?}", err);
+                    log::debug!("failed to set TCP_FASTOPEN_FORCE_ENABLE: {:?}", err);
                 }
             }
         }

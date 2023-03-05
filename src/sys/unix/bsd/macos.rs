@@ -45,7 +45,9 @@ impl TcpStream {
     }
 
     pub async fn connect_with_socket(socket: TcpSocket, addr: SocketAddr) -> io::Result<TcpStream> {
-        set_tcp_fastopen_force_enable(&socket)?;
+        if let Err(err) = set_tcp_fastopen_force_enable(&socket) {
+            log::debug!("failed to set TCP_FASTOPEN_FORCE_ENABLE: {:?}", err);
+        }
 
         unsafe {
             let raddr = SockAddr::from(addr);
