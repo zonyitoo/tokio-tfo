@@ -45,7 +45,7 @@ impl TcpStream {
     }
 
     pub async fn connect_with_socket(socket: TcpSocket, addr: SocketAddr) -> io::Result<TcpStream> {
-        // TFO in macos uses connectx
+        set_tcp_fastopen_force_enable(&socket)?;
 
         unsafe {
             let raddr = SockAddr::from(addr);
@@ -203,6 +203,30 @@ impl AsRawFd for TcpStream {
     fn as_raw_fd(&self) -> RawFd {
         self.inner.as_raw_fd()
     }
+}
+
+/// Disables the absolutely brutal TFO backoff mechanism on macOS.
+pub fn set_tcp_fastopen_force_enable<S: AsRawFd>(socket: &S) -> io::Result<()> {
+    const TCP_FASTOPEN_FORCE_ENABLE: libc::c_int = 0x218;
+    let enable: libc::c_int = 1;
+
+    unsafe {
+        let ret = libc::setsockopt(
+            socket.as_raw_fd(),
+            libc::IPPROTO_TCP,
+            TCP_FASTOPEN_FORCE_ENABLE,
+            &enable as *const _ as *const libc::c_void,
+            mem::size_of_val(&enable) as libc::socklen_t,
+        );
+
+        if ret != 0 {
+            let err = io::Error::last_os_error();
+            error!("set TCP_FASTOPEN_FORCE_ENABLE error: {}", err);
+            return Err(err);
+        }
+    }
+
+    Ok(())
 }
 
 /// Enable `TCP_FASTOPEN`

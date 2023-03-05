@@ -6,10 +6,15 @@ use std::{
     task::{Context, Poll},
 };
 
+use cfg_if::cfg_if;
 use futures::{future, ready};
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "watchos", target_os = "tvos"))]
+use log::debug;
 use tokio::net::{TcpListener as TokioTcpListener, TcpSocket};
 
 use crate::{stream::TfoStream, sys::set_tcp_fastopen};
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "watchos", target_os = "tvos"))]
+use crate::sys::set_tcp_fastopen_force_enable;
 
 /// TCP listener with TFO enabled
 pub struct TfoListener {
@@ -36,11 +41,27 @@ impl TfoListener {
         #[cfg(not(windows))]
         socket.set_reuseaddr(true)?;
 
+        // On all other platforms, TCP_FASTOPEN can be set before bind(), between bind() and listen(), or after listen().
+        // We prefer setting it before bind() as this feels most like the natural order of socket initialization sequence.
+        //
+        // On macOS, setting TCP_FASTOPEN_FORCE_ENABLE requires the socket to be in the TCPS_CLOSED state.
+        // TCP_FASTOPEN, on the other hand, can only be set when the socket is in the TCPS_LISTEN state.
+        cfg_if! {
+            if #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "watchos", target_os = "tvos")))] {
+                set_tcp_fastopen(&socket)?;
+            } else {
+                if let Err(err) = set_tcp_fastopen_force_enable(&socket) {
+                    debug!("failed to set TCP_FASTOPEN_FORCE_ENABLE: {:?}", err);
+                }
+            }
+        }
+
         socket.bind(addr)?;
 
         // mio's default backlog is 1024
         let inner = socket.listen(1024)?;
 
+        #[cfg(any(target_os = "macos", target_os = "ios", target_os = "watchos", target_os = "tvos"))]
         set_tcp_fastopen(&inner)?;
 
         Ok(TfoListener { inner })
