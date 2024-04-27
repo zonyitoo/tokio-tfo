@@ -1,7 +1,7 @@
 //! TFO stream
 
 #[cfg(unix)]
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, RawFd, AsFd, BorrowedFd};
 #[cfg(windows)]
 use std::os::windows::io::{AsRawSocket, RawSocket};
 use std::{
@@ -124,6 +124,13 @@ impl From<TokioTcpStream> for TfoStream {
         TfoStream {
             inner: SysTcpStream::from(s),
         }
+    }
+}
+
+#[cfg(unix)]
+impl AsFd for TfoStream {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.inner.as_fd()
     }
 }
 
