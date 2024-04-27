@@ -1,7 +1,7 @@
 //! TFO stream
 
 #[cfg(unix)]
-use std::os::unix::io::{AsRawFd, RawFd, AsFd, BorrowedFd};
+use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 #[cfg(windows)]
 use std::os::windows::io::{AsRawSocket, RawSocket};
 use std::{

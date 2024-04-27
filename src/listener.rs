@@ -2,7 +2,7 @@
 
 use std::{
     io,
-    net::SocketAddr,
+    net::{SocketAddr, TcpListener as StdTcpListener},
     task::{Context, Poll},
 };
 
@@ -63,6 +63,25 @@ impl TfoListener {
         set_tcp_fastopen(&inner)?;
 
         Ok(TfoListener { inner })
+    }
+
+    /// Creates new `TfoListener` from a `std::net::TcpListener`.
+    ///
+    /// This will enable the TCP listener with TFO enabled.
+    ///
+    /// The `std::net::TcpListener` must be in TCPS_LISTEN.
+    pub fn from_std(listener: StdTcpListener) -> io::Result<TfoListener> {
+        // The listener must set_nonblocking for TokioTcpListener::from_std.
+        listener.set_nonblocking(true)?;
+        Self::from_tokio(TokioTcpListener::from_std(listener)?)
+    }
+
+    /// Creates new `TfoListener` from a `tokio::net::TcpListener`.
+    ///
+    /// This will enable the TCP listener with TFO enabled.
+    pub fn from_tokio(listener: TokioTcpListener) -> io::Result<TfoListener> {
+        set_tcp_fastopen(&listener)?;
+        Ok(TfoListener { inner: listener })
     }
 
     /// Polls to accept a new incoming connection to this listener.
