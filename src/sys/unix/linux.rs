@@ -2,7 +2,7 @@ use std::{
     io::{self, ErrorKind},
     mem,
     net::{SocketAddr, TcpStream as StdTcpStream},
-    os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd},
+    os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, RawFd},
     pin::Pin,
     sync::atomic::{AtomicBool, Ordering},
     task::{self, Poll, Waker},
@@ -371,6 +371,16 @@ impl AsyncWrite for TcpStream {
         match self.project().stream.project() {
             TcpStreamOptionProj::Connected(stream) => stream.poll_shutdown(cx),
             _ => Ok(()).into(),
+        }
+    }
+}
+
+impl AsFd for TcpStream {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        match self.stream {
+            TcpStreamOption::Connected(ref s) => s.as_fd(),
+            TcpStreamOption::Connecting { ref socket, .. } => socket.as_fd(),
+            _ => unreachable!("stream connected without a TcpStream instance"),
         }
     }
 }
