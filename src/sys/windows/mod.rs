@@ -160,28 +160,9 @@ impl TcpStream {
 
     pub async fn connect_with_socket(socket: TcpSocket, addr: SocketAddr) -> io::Result<TcpStream> {
         let sock = socket.as_raw_socket() as SOCKET;
+        set_tcp_fastopen(&socket)?;
 
         unsafe {
-            // TCP_FASTOPEN was supported since Windows 10
-
-            // Enable TCP_FASTOPEN option
-
-            let enable: u32 = 1;
-
-            let ret = setsockopt(
-                sock,
-                IPPROTO_TCP as i32,
-                TCP_FASTOPEN as i32,
-                &enable as *const _ as PCSTR,
-                mem::size_of_val(&enable) as i32,
-            );
-
-            if ret == SOCKET_ERROR {
-                let err = io::Error::from_raw_os_error(WSAGetLastError());
-                error!("set TCP_FASTOPEN error: {}", err);
-                return Err(err);
-            }
-
             // Bind to a dummy address (required for TFO socket)
             let result = match addr.ip() {
                 IpAddr::V4(..) => socket.bind(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0)),

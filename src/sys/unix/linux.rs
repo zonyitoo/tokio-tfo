@@ -81,7 +81,7 @@ impl TcpStream {
 
         // TFO in Linux was supported since 3.7
         //
-        // But TCP_FASTOPEN_CONNECT was supported since 4.1, so we have to be compatible with it
+        // But TCP_FASTOPEN_CONNECT was supported since 4.1, we have to check whether it is supported first.
         static SUPPORT_TCP_FASTOPEN_CONNECT: AtomicBool = AtomicBool::new(true);
         if SUPPORT_TCP_FASTOPEN_CONNECT.load(Ordering::Relaxed) {
             unsafe {
