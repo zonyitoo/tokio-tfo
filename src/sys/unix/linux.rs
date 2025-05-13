@@ -61,7 +61,7 @@ macro_rules! call_socket_api {
     ($self:ident . $name:ident ( $($param:expr),* )) => {{
         let socket = unsafe { Socket::from_raw_fd($self.as_raw_fd()) };
         let result = socket.$name($($param,)*);
-        socket.into_raw_fd();
+        let _ = socket.into_raw_fd();
         result
     }};
 }

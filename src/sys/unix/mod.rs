@@ -28,6 +28,6 @@ cfg_if! {
 pub(crate) fn socket_take_error<S: AsRawFd>(fd: &S) -> io::Result<Option<io::Error>> {
     let socket = unsafe { Socket::from_raw_fd(fd.as_raw_fd()) };
     let result = socket.take_error();
-    socket.into_raw_fd();
+    let _ = socket.into_raw_fd();
     result
 }

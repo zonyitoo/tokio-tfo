@@ -143,7 +143,7 @@ macro_rules! call_socket_api {
     ($self:ident . $name:ident ( $($param:expr),* )) => {{
         let socket = unsafe { Socket::from_raw_socket($self.as_raw_socket()) };
         let result = socket.$name($($param,)*);
-        socket.into_raw_socket();
+        let _ = socket.into_raw_socket();
         result
     }};
 }
@@ -498,6 +498,6 @@ pub fn set_tcp_fastopen<S: AsRawSocket>(socket: &S) -> io::Result<()> {
 pub(crate) fn socket_take_error<S: AsRawSocket>(fd: &S) -> io::Result<Option<io::Error>> {
     let socket = unsafe { Socket::from_raw_socket(fd.as_raw_socket()) };
     let result = socket.take_error();
-    socket.into_raw_socket();
+    let _ = socket.into_raw_socket();
     result
 }

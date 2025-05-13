@@ -21,6 +21,7 @@ use tokio::{
 use crate::sys::socket_take_error;
 
 enum TcpStreamState {
+    Established,
     Connected,
     FastOpenConnecting,
     FastOpenWrite,
@@ -113,10 +114,45 @@ impl AsyncRead for TcpStream {
 impl AsyncWrite for TcpStream {
     fn poll_write(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
         loop {
-            let TcpStreamProj { inner, state } = self.as_mut().project();
+            let TcpStreamProj { mut inner, state } = self.as_mut().project();
 
             match *state {
-                TcpStreamState::Connected => return inner.poll_write(cx, buf),
+                TcpStreamState::Established => return inner.poll_write(cx, buf),
+
+                TcpStreamState::Connected => {
+                    match inner.as_mut().poll_write(cx, buf) {
+                        Poll::Ready(Ok(n)) => {
+                            *state = TcpStreamState::Established;
+                            return Poll::Ready(Ok(n));
+                        }
+                        Poll::Ready(Err(err)) => {
+                            // Quoted from facebook's folly doc:
+                            //
+                            // > Apple has a bug where doing a second write on a socket which we
+                            // > have opened with TFO causes an ENOTCONN to be thrown. However the
+                            // > socket is really connected, so treat ENOTCONN as a EAGAIN until
+                            // > this bug is fixed.
+                            //
+                            // Furthermore, send() may also return EPIPE when TFO connecting.
+                            //
+                            // NOTE: Google search results show that this behavior exists in FreeBSD, too.
+                            // https://lists.exim.org/lurker/message/20191209.151716.0d961f15.fi.html
+                            if err.kind() == ErrorKind::NotConnected
+                                || matches!(err.raw_os_error(), Some(libc::ENOTCONN) | Some(libc::EPIPE))
+                            {
+                                // Let FastOpenConnecting recheck socket's state, and check socket's SO_ERROR
+                                //
+                                // NOTE: If write() returns EAGAIN, we should return Poll::Pending.
+                                // But poll_write_ready will still return Poll::Pending if socket is not ready.
+                                *state = TcpStreamState::FastOpenConnecting;
+                                continue;
+                            }
+
+                            return Poll::Ready(Err(err));
+                        }
+                        Poll::Pending => return Poll::Pending,
+                    }
+                }
 
                 TcpStreamState::FastOpenConnecting => {
                     // Waiting for `connect` finish if `connect` returns EINPROGRESS

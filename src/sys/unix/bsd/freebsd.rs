@@ -1,5 +1,6 @@
 use std::{
-    io, mem,
+    io,
+    mem,
     net::{SocketAddr, TcpStream as StdTcpStream},
     os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, RawFd},
     pin::Pin,
@@ -20,6 +21,7 @@ use crate::sys::socket_take_error;
 
 #[derive(Clone, Copy, Debug)]
 enum TcpStreamState {
+    Established,
     Connected,
     FastOpenConnect,
     FastOpenConnecting,
@@ -58,7 +60,7 @@ macro_rules! call_socket_api {
     ($self:ident . $name:ident ( $($param:expr),* )) => {{
         let socket = unsafe { Socket::from_raw_fd($self.as_raw_fd()) };
         let result = socket.$name($($param,)*);
-        socket.into_raw_fd();
+        let _ = socket.into_raw_fd();
         result
     }};
 }
@@ -175,7 +177,33 @@ impl AsyncWrite for TcpStream {
             let TcpStreamProj { state, mut stream } = self.as_mut().project();
 
             match *state {
-                TcpStreamState::Connected => return stream.connected().poll_write(cx, buf),
+                TcpStreamState::Established => return stream.connected().poll_write(cx, buf),
+
+                TcpStreamState::Connected => {
+                    match stream.connected().poll_write(cx, buf) {
+                        Poll::Ready(Ok(n)) => {
+                            *state = TcpStreamState::Established;
+                            return Poll::Ready(Ok(n));
+                        }
+                        Poll::Ready(Err(err)) => {
+                            // The second write() may return ENOTCONN | EPIPE if the socket is still in the connecting state.
+                            // Same behavior could be found in macOS, too.
+                            //
+                            // We will treat ENOTCONN | EPIPE as EAGAIN and retry.
+                            //
+                            // See: macos.rs AsyncWrite::poll_write
+                            if err.kind() == io::ErrorKind::NotConnected
+                                || matches!(err.raw_os_error(), Some(libc::ENOTCONN) | Some(libc::EPIPE))
+                            {
+                                *state = TcpStreamState::FastOpenConnecting;
+                                continue;
+                            }
+
+                            return Poll::Ready(Err(err));
+                        }
+                        Poll::Pending => return Poll::Pending,
+                    }
+                }
 
                 TcpStreamState::FastOpenConnecting => {
                     // Waiting for `connect` finish if `connect` returns EINPROGRESS
