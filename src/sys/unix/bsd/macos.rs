@@ -137,9 +137,7 @@ impl AsyncWrite for TcpStream {
                             //
                             // NOTE: Google search results show that this behavior exists in FreeBSD, too.
                             // https://lists.exim.org/lurker/message/20191209.151716.0d961f15.fi.html
-                            if err.kind() == ErrorKind::NotConnected
-                                || matches!(err.raw_os_error(), Some(libc::ENOTCONN) | Some(libc::EPIPE))
-                            {
+                            if err.kind() == ErrorKind::NotConnected || err.raw_os_error() == Some(libc::ENOTCONN) {
                                 // Let FastOpenConnecting recheck socket's state, and check socket's SO_ERROR
                                 //
                                 // NOTE: If write() returns EAGAIN, we should return Poll::Pending.
