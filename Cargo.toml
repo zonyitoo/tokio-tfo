@@ -1,6 +1,6 @@
 [package]
 name = "tokio-tfo"
-version = "0.3.4"
+version = "0.4.0"
 edition = "2021"
 description = "TCP Fast Open (TFO) in Rust for tokio"
 repository = "https://github.com/zonyitoo/tokio-tfo"
@@ -18,7 +18,7 @@ futures = "0.3"
 log = "0.4"
 pin-project = "1.0"
 
-socket2 = { version = "0.5.3", features = ["all"] }
+socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1.9.0", features = [
     "io-util",
     "macros",
@@ -29,7 +29,7 @@ tokio = { version = "1.9.0", features = [
 ] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.52", features = [
+windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_System_IO",
     "Win32_Networking_WinSock",

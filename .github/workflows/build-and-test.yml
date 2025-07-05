@@ -11,7 +11,7 @@ env:
   RUST_LOG: "trace"
 
 jobs:
-  buid-test-check:
+  build-test-check-native:
     strategy:
       matrix:
         platform:
@@ -42,3 +42,59 @@ jobs:
             -W clippy::absurd_extreme_comparisons
             -W clippy::erasing_op
             -A clippy::collapsible_else_if
+
+  build-cross:
+    strategy:
+      matrix:
+        platform:
+          - target: x86_64-unknown-linux-musl
+            toolchain: stable
+          - target: aarch64-unknown-linux-gnu
+            toolchain: stable
+          - target: aarch64-unknown-linux-musl
+            toolchain: stable
+          - target: mips-unknown-linux-gnu
+            toolchain: nightly
+          - target: mipsel-unknown-linux-gnu
+            toolchain: nightly
+          - target: mips64el-unknown-linux-gnuabi64
+            toolchain: nightly
+          - target: loongarch64-unknown-linux-gnu
+            toolchain: stable
+          - target: loongarch64-unknown-linux-musl
+            toolchain: stable
+          - target: powerpc-unknown-linux-gnu
+            toolchain: stable
+          - target: powerpc64-unknown-linux-gnu
+            toolchain: stable
+          - target: powerpc64le-unknown-linux-gnu
+            toolchain: stable
+          - target: riscv64gc-unknown-linux-gnu
+            toolchain: stable
+          - target: riscv64gc-unknown-linux-musl
+            toolchain: stable
+          - target: aarch64-linux-android
+            toolchain: stable
+          - target: x86_64-linux-android
+            toolchain: stable
+          - target: x86_64-unknown-freebsd
+            toolchain: stable
+          - target: x86_64-pc-windows-gnu
+            toolchain: stable
+      fail-fast: false
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          components: clippy
+          toolchain: ${{ matrix.platform.toolchain }}
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build & Test (Default)
+        run: cross +${{ matrix.platform.toolchain }} build --target ${{ matrix.platform.target }}

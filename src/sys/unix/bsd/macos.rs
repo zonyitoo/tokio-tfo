@@ -54,7 +54,7 @@ impl TcpStream {
             let raddr = SockAddr::from(addr);
 
             let mut endpoints: libc::sa_endpoints_t = mem::zeroed();
-            endpoints.sae_dstaddr = raddr.as_ptr();
+            endpoints.sae_dstaddr = raddr.as_ptr() as *const _;
             endpoints.sae_dstaddrlen = raddr.len();
 
             let ret = libc::connectx(

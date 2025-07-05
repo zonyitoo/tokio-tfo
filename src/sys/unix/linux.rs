@@ -143,11 +143,11 @@ impl TcpStream {
     }
 
     pub fn nodelay(&self) -> io::Result<bool> {
-        call_socket_api!(self.nodelay())
+        call_socket_api!(self.tcp_nodelay())
     }
 
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
-        call_socket_api!(self.set_nodelay(nodelay))
+        call_socket_api!(self.set_tcp_nodelay(nodelay))
     }
 
     pub fn linger(&self) -> io::Result<Option<Duration>> {
@@ -159,11 +159,11 @@ impl TcpStream {
     }
 
     pub fn ttl(&self) -> io::Result<u32> {
-        call_socket_api!(self.ttl())
+        call_socket_api!(self.ttl_v4())
     }
 
     pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
-        call_socket_api!(self.set_ttl(ttl))
+        call_socket_api!(self.set_ttl_v4(ttl))
     }
 }
 
@@ -237,7 +237,7 @@ impl AsyncWrite for TcpStream {
                             buf.as_ptr() as *const libc::c_void,
                             buf.len(),
                             libc::MSG_FASTOPEN,
-                            saddr.as_ptr(),
+                            saddr.as_ptr() as *const _,
                             saddr.len(),
                         )
                     };

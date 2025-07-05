@@ -21,9 +21,9 @@ use tokio::{
 };
 
 use windows_sys::{
-    core::{GUID, PCSTR},
+    core::{BOOL, GUID, PCSTR},
     Win32::{
-        Foundation::BOOL,
+        Foundation::{FALSE, TRUE},
         Networking::WinSock::{
             closesocket,
             setsockopt,
@@ -60,10 +60,6 @@ const WSAID_CONNECTEX: GUID = GUID {
     data3: 0x4660,
     data4: [0x8e, 0xe9, 0x76, 0xe5, 0x8c, 0x74, 0x06, 0x3e],
 };
-
-// BOOL values
-const TRUE: BOOL = 1;
-const FALSE: BOOL = 0;
 
 static PFN_CONNECTEX_OPT: Lazy<LPFN_CONNECTEX> = Lazy::new(|| unsafe {
     let socket = socket(AF_INET as i32, SOCK_STREAM as i32, 0);
@@ -159,24 +155,21 @@ impl TcpStream {
     }
 
     pub async fn connect_with_socket(socket: TcpSocket, addr: SocketAddr) -> io::Result<TcpStream> {
-        let sock = socket.as_raw_socket() as SOCKET;
         set_tcp_fastopen(&socket)?;
 
-        unsafe {
-            // Bind to a dummy address (required for TFO socket)
-            let result = match addr.ip() {
-                IpAddr::V4(..) => socket.bind(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0)),
-                IpAddr::V6(..) => socket.bind(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0)),
-            };
+        // Bind to a dummy address (required for TFO socket)
+        let result = match addr.ip() {
+            IpAddr::V4(..) => socket.bind(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 0)),
+            IpAddr::V6(..) => socket.bind(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0)),
+        };
 
-            if let Err(err) = result {
-                // https://docs.microsoft.com/en-us/windows/win32/api/winsock/nf-winsock-bind
-                // This error is returned of the socket `s` is already bound to an address.
-                if let Some(WSAEINVAL) = err.raw_os_error() {
-                    // It is Ok if socket have already bound to an address.
-                } else {
-                    return Err(err);
-                }
+        if let Err(err) = result {
+            // https://docs.microsoft.com/en-us/windows/win32/api/winsock/nf-winsock-bind
+            // This error is returned of the socket `s` is already bound to an address.
+            if let Some(WSAEINVAL) = err.raw_os_error() {
+                // It is Ok if socket have already bound to an address.
+            } else {
+                return Err(err);
             }
         }
 
@@ -203,11 +196,11 @@ impl TcpStream {
     }
 
     pub fn nodelay(&self) -> io::Result<bool> {
-        call_socket_api!(self.nodelay())
+        call_socket_api!(self.tcp_nodelay())
     }
 
     pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
-        call_socket_api!(self.set_nodelay(nodelay))
+        call_socket_api!(self.set_tcp_nodelay(nodelay))
     }
 
     pub fn linger(&self) -> io::Result<Option<Duration>> {
@@ -219,11 +212,11 @@ impl TcpStream {
     }
 
     pub fn ttl(&self) -> io::Result<u32> {
-        call_socket_api!(self.ttl())
+        call_socket_api!(self.ttl_v4())
     }
 
     pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
-        call_socket_api!(self.set_ttl(ttl))
+        call_socket_api!(self.set_ttl_v4(ttl))
     }
 }
 
